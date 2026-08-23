@@ -11,6 +11,24 @@
 
 #define COUNTDOWN_THRESHOLD_S (3)
 
+/*
+ * Front-display time reveal policy.
+ *
+ * Stock behaviour ping-pongs the remaining-time label across the front display
+ * for the whole work phase whenever a custom theme is active: hidden for
+ * TIMER_HIDDEN_TIME_MS, shown for TIMER_SHOWN_TIME_MS, repeating forever. The
+ * front display faces the room rather than the user, so the reveal interrupts
+ * the status the theme exists to broadcast while telling the user nothing they
+ * cannot already see — the back display carries the same countdown
+ * continuously in the mirror card footer.
+ *
+ * With auto-reveal off the front display stays on the theme, and the label is
+ * shown only when the user actually asks for it: turning the scroll wheel to
+ * adjust the time, or the final COUNTDOWN_THRESHOLD_S seconds of a phase.
+ * Set to 1 to restore the stock cycle; TIMER_HIDDEN_TIME_MS then sets its period.
+ */
+#define TIMER_AUTO_REVEAL (0)
+
 #define TIMER_HIDDEN_TIME_MS (S_TO_MS(15))
 #define TIMER_SHOWN_TIME_MS  (S_TO_MS(5))
 
@@ -106,6 +124,12 @@ static void busy_scene_timer_pubsub_callback(const void* msg, void* context) {
 
 static bool busy_scene_timer_has_label_tweaks(const BusySceneTimer* data) {
     return data->is_custom_theme && data->timer_state == BusyTimerStateWork;
+}
+
+/** Begin the hidden half of the automatic reveal cycle, unless auto-reveal is disabled. */
+static void busy_scene_timer_arm_auto_reveal(const BusySceneTimer* data) {
+    if(!TIMER_AUTO_REVEAL) return;
+    furi_event_loop_timer_start(data->show_label_timer, TIMER_HIDDEN_TIME_MS);
 }
 
 static void busy_scene_timer_update_tick(BusyApp* instance) {
@@ -269,7 +293,7 @@ static void busy_scene_timer_update_timer_state(BusyApp* instance) {
 
                 if(!data->is_mode_transition) {
                     timer_label_hide(data->timer_label, false);
-                    furi_event_loop_timer_start(data->show_label_timer, TIMER_HIDDEN_TIME_MS);
+                    busy_scene_timer_arm_auto_reveal(data);
                 }
 
             } else {
@@ -322,7 +346,7 @@ static void busy_scene_timer_handle_pause(BusyApp* instance) {
 
         if(!is_paused && busy_scene_timer_has_label_tweaks(data)) {
             if(!data->is_mode_transition) {
-                furi_event_loop_timer_start(data->show_label_timer, TIMER_HIDDEN_TIME_MS);
+                busy_scene_timer_arm_auto_reveal(data);
                 timer_label_hide(data->timer_label, true);
             } else {
                 // HACK: BusyTimerEventTypePaused event is the last one to be emitted
@@ -470,7 +494,10 @@ static void busy_scene_timer_show_label_timer_callback(void* context) {
             timer_label_show(data->timer_label, true);
 
         } else if(prev_interval_ms == TIMER_SHOWN_TIME_MS) {
-            interval_ms = TIMER_HIDDEN_TIME_MS;
+            // Zero ends the cycle rather than queueing the next reveal, so a
+            // user-driven show (scroll adjust, final countdown) fades out once
+            // and leaves the front display back on the theme.
+            interval_ms = TIMER_AUTO_REVEAL ? TIMER_HIDDEN_TIME_MS : 0;
             timer_label_hide(data->timer_label, true);
 
         } else {
@@ -478,7 +505,9 @@ static void busy_scene_timer_show_label_timer_callback(void* context) {
         }
     });
 
-    furi_event_loop_timer_start(label_timer, interval_ms);
+    if(interval_ms > 0) {
+        furi_event_loop_timer_start(label_timer, interval_ms);
+    }
 }
 
 // Standard SceneManager event handlers
