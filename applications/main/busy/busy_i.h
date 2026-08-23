@@ -12,6 +12,7 @@
 #include <loader/loader.h>
 #include <front_display/front_display.h>
 #include <busy_timer/busy_timer.h>
+#include <stopwatch/stopwatch.h>
 #include <applications/system/updater/updater.h>
 
 #include "busy.h"
@@ -53,6 +54,9 @@ typedef enum {
     BusyCustomEventReturnToStart,
     BusyCustomEventAnimationCompleted,
     BusyCustomEventAppConfigChanged,
+    BusyCustomEventStopwatchUpdated,
+    BusyCustomEventStopwatchToggle,
+    BusyCustomEventStopwatchReset,
     BusyCustomEventMax,
 } BusyCustomEvent;
 
@@ -85,6 +89,7 @@ struct BusyApp {
     FuriMessageQueue* api_queue;
     SceneManager* scene_manager;
     BusyTimer* busy_timer;
+    Stopwatch* stopwatch;
     FrontDisplaySrv* front_display;
     Audio* audio;
     Gui* gui;

@@ -117,6 +117,7 @@ static BusyApp* busy_alloc(const char* arg) {
     instance->api_queue = furi_message_queue_alloc(API_QUEUE_SIZE, sizeof(BusyApiMessage));
     instance->scene_manager = scene_manager_alloc(busy_scenes, BusyAppSceneIdMax, instance);
     instance->busy_timer = furi_record_open(RECORD_BUSY_TIMER);
+    instance->stopwatch = furi_record_open(RECORD_STOPWATCH);
     instance->audio = furi_record_open(RECORD_AUDIO);
     instance->gui = furi_record_open(RECORD_GUI);
     instance->updater = furi_record_open(RECORD_UPDATER);
@@ -191,7 +192,13 @@ static BusyApp* busy_alloc(const char* arg) {
     furi_record_create(RECORD_BUSY_APP, instance);
 
     if(instance->run_mode == BusyAppRunModeNormal) {
-        scene_manager_next_scene(instance->scene_manager, BusyAppSceneIdStart);
+        // CUSTOM is the stopwatch slot: show the count immediately rather than a
+        // start menu, since the stopwatch is very likely already running.
+        const BusyAppSceneId initial_scene =
+            (busy_get_profile_id(instance) == BusyTimerProfileIdCustom) ?
+                BusyAppSceneIdStopwatch :
+                BusyAppSceneIdStart;
+        scene_manager_next_scene(instance->scene_manager, initial_scene);
     }
 
     return instance;
@@ -222,6 +229,7 @@ static void busy_free(BusyApp* instance) {
     });
 
     furi_record_close(RECORD_BUSY_TIMER);
+    furi_record_close(RECORD_STOPWATCH);
     furi_record_close(RECORD_LOADER);
     furi_record_close(RECORD_UPDATER);
     furi_record_close(RECORD_AUDIO);

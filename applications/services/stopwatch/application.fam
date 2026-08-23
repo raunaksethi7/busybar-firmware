@@ -1,0 +1,10 @@
+App(
+    appid="stopwatch",
+    name="Stopwatch",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="stopwatch_srv",
+    cdefines=["SRV_STOPWATCH"],
+    stack_size=1 * 1024,
+    targets=["f20", "f21", "f22"],
+    order=191,
+)

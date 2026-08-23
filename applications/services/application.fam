@@ -57,6 +57,7 @@ App(
         "matter",
         "device_name",
         "busy_timer",
+        "stopwatch",
         "sl_info",
         "state_publisher",
         "discovery",

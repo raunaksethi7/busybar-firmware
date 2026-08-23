@@ -10,6 +10,7 @@ extern const Scene busy_scene_setup_smart_home;
 extern const Scene busy_scene_start;
 extern const Scene busy_scene_timer;
 extern const Scene busy_scene_show_timer;
+extern const Scene busy_scene_stopwatch;
 extern const Scene busy_scene_ending;
 extern const Scene busy_scene_finish;
 
@@ -26,4 +27,5 @@ const Scene* const busy_scenes[BusyAppSceneIdMax] = {
     [BusyAppSceneIdSetupTheme] = &busy_scene_setup_theme,
     [BusyAppSceneIdSetupSmartHome] = &busy_scene_setup_smart_home,
     [BusyAppSceneIdShowTimer] = &busy_scene_show_timer,
+    [BusyAppSceneIdStopwatch] = &busy_scene_stopwatch,
 };
