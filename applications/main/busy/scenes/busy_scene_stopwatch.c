@@ -42,16 +42,24 @@
 #define STOPWATCH_SLIDE_MS (340)
 
 /**
- * Measured on hardware at the 14px face: a digit is ~11px and a colon ~6px, so MM:SS is
- * 50px and H:MM:SS is 66px — both fit the 72px panel. HH:MM:SS would be 78px.
+ * Every digit is the same size at every count. Measured on hardware at this face a digit
+ * is ~11px and a colon ~6px, so MM:SS is 50px and H:MM:SS is 66px against a 72px panel.
+ * HH:MM:SS would be ~77px.
  *
- * Rather than shrink the whole readout past ten hours, only the hours prefix steps down
- * to the 10px face: "HH:" is then ~16px and the minutes and seconds stay at full size,
- * for ~66px total. Minutes and seconds are what a stopwatch is actually read for, so
- * they never shrink.
+ * Those last few pixels are taken out of the gaps between characters rather than out of
+ * the glyphs: past ten hours the tracking tightens by a pixel, which is invisible next to
+ * a readout where half the digits had shrunk.
  */
-#define STOPWATCH_FONT_WIDE   FONT_BUSY_REGULAR_14
-#define STOPWATCH_FONT_NARROW FONT_BUSY_BOLD_10
+#define STOPWATCH_FONT (FONT_BUSY_REGULAR_14)
+
+/**
+ * Tracking applied only in the eight-character band, to claw back ~7px.
+ *
+ * -1 is the floor. Measured on hardware, -2 pulls the glyphs into each other badly
+ * enough that the colons stop reading as separators and the whole thing turns to mush.
+ * At -1 the readout is 71px of the 72 available: flush to the left edge, but complete.
+ */
+#define STOPWATCH_TIGHT_TRACKING (-1)
 
 typedef enum {
     /** MM:SS */
@@ -89,10 +97,9 @@ static StopwatchFormat busy_scene_stopwatch_format_for(uint32_t elapsed_ms) {
     return (hours < 10) ? StopwatchFormatOneHourDigit : StopwatchFormatTwoHourDigits;
 }
 
-/** The hours prefix shrinks only when it needs a second digit. */
-static const char* busy_scene_stopwatch_head_font(StopwatchFormat format) {
-    return (format == StopwatchFormatTwoHourDigits) ? STOPWATCH_FONT_NARROW :
-                                                      STOPWATCH_FONT_WIDE;
+/** Only the widest band needs tightening; the others have room to spare. */
+static int32_t busy_scene_stopwatch_tracking(StopwatchFormat format) {
+    return (format == StopwatchFormatTwoHourDigits) ? STOPWATCH_TIGHT_TRACKING : 0;
 }
 
 static void busy_scene_stopwatch_texts(
@@ -179,8 +186,10 @@ static void busy_scene_stopwatch_render(BusyApp* instance) {
         const int32_t previous_tail_x = data->tail_x;
 
         if(is_transition) {
-            // Only the head ever changes face; the tail stays at the wide one for life.
-            label_set_font(data->head, busy_scene_stopwatch_head_font(format));
+            // The face never changes — only how tightly the characters are packed.
+            const int32_t tracking = busy_scene_stopwatch_tracking(format);
+            label_set_letter_spacing(data->head, tracking);
+            label_set_letter_spacing(data->tail, tracking);
         }
 
         label_set_text(data->head, head_text);
@@ -290,12 +299,14 @@ static void busy_scene_stopwatch_on_enter(void* context) {
         // glyph box below the panel's 16 rows and clipped the bottom of every digit.
         data->head = label_alloc(instance->front_window);
         label_set_text_color(data->head, white);
-        label_set_font(data->head, busy_scene_stopwatch_head_font(data->format));
+        label_set_font(data->head, STOPWATCH_FONT);
+        label_set_letter_spacing(data->head, busy_scene_stopwatch_tracking(data->format));
         widget_set_align(label_get_base(data->head), AlignLeftMid);
 
         data->tail = label_alloc(instance->front_window);
         label_set_text_color(data->tail, white);
-        label_set_font(data->tail, STOPWATCH_FONT_WIDE);
+        label_set_font(data->tail, STOPWATCH_FONT);
+        label_set_letter_spacing(data->tail, busy_scene_stopwatch_tracking(data->format));
         widget_set_align(label_get_base(data->tail), AlignLeftMid);
 
         widget_set_visible(mirror_card_get_base(instance->timer_card), true);

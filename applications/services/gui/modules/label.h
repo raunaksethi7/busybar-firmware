@@ -120,6 +120,17 @@ void label_set_text_fmt(Label* instance, const char* fmt, ...)
 void label_set_line_spacing(Label* instance, int32_t spacing);
 
 /**
+ * @brief Set the spacing between characters.
+ *
+ * Negative values tighten the text, which is how a fixed string is made to fit a
+ * panel it would otherwise overflow by a pixel or two.
+ *
+ * @param[in,out] instance pointer to the Label instance to be modified
+ * @param[in] spacing spacing value in pixels; may be negative
+ */
+void label_set_letter_spacing(Label* instance, int32_t spacing);
+
+/**
  * @brief Set the label text alignment.
  *
  * @param[in,out] instance pointer to the Label instance to be modified
