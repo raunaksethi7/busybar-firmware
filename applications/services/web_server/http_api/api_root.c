@@ -711,6 +711,14 @@ static const HttpHandler handlers_api_root[] = {
         .on_request = http_api_busy_callback,
     },
     {
+        .uri = "stopwatch",
+        .method = HttpMethodAny,
+        .type = HttpHandlerCustom,
+        .ctx_alloc = http_api_stopwatch_alloc,
+        .ctx_free = http_api_stopwatch_free,
+        .on_request = http_api_stopwatch_callback,
+    },
+    {
         .uri = "smart_home",
         .method = HttpMethodAny,
         .type = HttpHandlerCustom,

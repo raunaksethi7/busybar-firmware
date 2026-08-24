@@ -84,6 +84,9 @@ typedef struct {
 
     StopwatchFormat format;
     bool is_head_pending;
+    /** Last text pushed to the mirror card, so identical writes are skipped. */
+    char card_header[8];
+    char card_time[STOPWATCH_TEXT_LEN * 2];
     /** Widget has no position getter, so the slide's start point is tracked here. */
     int32_t tail_x;
 } BusySceneStopwatch;
@@ -219,10 +222,22 @@ static void busy_scene_stopwatch_render(BusyApp* instance) {
             busy_scene_stopwatch_layout(data, head_width, -1);
         }
 
-        mirror_card_set_header_text(
-            instance->timer_card, data->state.is_running ? "RUNNING" : "PAUSED");
-        mirror_card_set_footer_primary_text(
-            instance->timer_card, head_text[0] != '\0' ? head_text : tail_text);
+        // Keep these short and only write them when they change. The mirror card's text
+        // boxes are narrow; a string that overflows switches the label into its scrolling
+        // long-content mode, and re-setting the text every second restarts that animation,
+        // which on a 16-grey panel reads as smeared, doubled glyphs rather than motion.
+        const char* header = data->state.is_running ? "ACTIVE" : "PAUSED";
+        if(strcmp(data->card_header, header) != 0) {
+            strncpy(data->card_header, header, sizeof(data->card_header) - 1);
+            mirror_card_set_header_text(instance->timer_card, data->card_header);
+        }
+
+        char card_time[sizeof(data->card_time)];
+        snprintf(card_time, sizeof(card_time), "%s%s", head_text, tail_text);
+        if(strcmp(data->card_time, card_time) != 0) {
+            strncpy(data->card_time, card_time, sizeof(data->card_time) - 1);
+            mirror_card_set_footer_primary_text(instance->timer_card, data->card_time);
+        }
     });
 }
 
@@ -287,6 +302,8 @@ static void busy_scene_stopwatch_on_enter(void* context) {
     data->format = busy_scene_stopwatch_format_for(data->state.elapsed_ms);
     data->is_head_pending = false;
     data->tail_x = 0;
+    data->card_header[0] = '\0';
+    data->card_time[0] = '\0';
 
     with_gui(instance->gui, {
         GuiLayer* layer = gui_get_layer(instance->gui, GuiLayerIdMain);
@@ -313,7 +330,7 @@ static void busy_scene_stopwatch_on_enter(void* context) {
         widget_set_visible(nav_bar_get_base(instance->nav_bar), false);
         mirror_card_set_show_header(instance->timer_card, true);
         mirror_card_set_show_footer(instance->timer_card, true);
-        mirror_card_set_footer_secondary_text(instance->timer_card, "ELAPSED");
+        mirror_card_set_footer_secondary_text(instance->timer_card, "TOTAL");
     });
 
     data->reveal_timer = furi_event_loop_timer_alloc(

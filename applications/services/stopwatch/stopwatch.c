@@ -2,6 +2,14 @@
 
 #include <furi_hal_rtc.h>
 
+/**
+ * Seed the count at boot. A demo/debug seam so a long elapsed time can be put on the
+ * hardware without waiting for it; 0 in any real build.
+ */
+#ifndef STOPWATCH_DEBUG_SEED_MS
+#define STOPWATCH_DEBUG_SEED_MS (0UL)
+#endif
+
 // MARK: - State
 
 static void stopwatch_notify(const Stopwatch* instance, StopwatchEventType type) {
@@ -165,9 +173,9 @@ static Stopwatch* stopwatch_alloc(void) {
         furi_message_queue_alloc(STOPWATCH_API_QUEUE_SIZE, sizeof(StopwatchApiMessage));
     instance->event_pubsub = furi_pubsub_alloc();
 
-    instance->elapsed_ms = 0;
+    instance->elapsed_ms = STOPWATCH_DEBUG_SEED_MS;
     instance->prev_tick_timestamp_ms = 0;
-    instance->published_second = 0;
+    instance->published_second = instance->elapsed_ms / 1000;
     instance->is_running = false;
 
     furi_event_loop_subscribe_message_queue(
