@@ -232,6 +232,17 @@ int32_t widget_get_max_height(const Widget* instance);
  * @param[in,out] instance pointer to the Widget instance to be modified
  * @param[in] x new horizontal position in pixels
  */
+/**
+ * @brief Bring the widget's geometry up to date immediately.
+ *
+ * Size and position are normally recalculated on the next frame, so a widget queried in
+ * the same breath as its content was set reports stale geometry. Call this in between
+ * when a measurement has to be correct right now.
+ *
+ * @param[in,out] instance pointer to the Widget instance to be updated
+ */
+void widget_update_layout(Widget* instance);
+
 void widget_set_pos_x(Widget* instance, int32_t x);
 
 /**

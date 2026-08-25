@@ -299,6 +299,11 @@ int32_t widget_get_max_height(const Widget* instance) {
     return lv_obj_get_style_max_height(TO_LV_OBJ(instance), LV_PART_MAIN);
 }
 
+void widget_update_layout(Widget* instance) {
+    furi_check(instance);
+    lv_obj_update_layout((lv_obj_t*)instance);
+}
+
 void widget_set_pos_x(Widget* instance, int32_t x) {
     furi_check(instance);
     lv_obj_set_x((lv_obj_t*)instance, x);

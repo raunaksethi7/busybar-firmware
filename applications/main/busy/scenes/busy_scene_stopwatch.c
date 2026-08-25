@@ -42,6 +42,20 @@
 #define STOPWATCH_SLIDE_MS (340)
 
 /**
+ * How long Start/Pause must be held to zero the count.
+ *
+ * The system's own long-press fires after INPUT_LONG_PRESS_COUNTS * INPUT_PRESS_TICKS,
+ * which is 300 ms — short enough that something leaning on the button inside a bag will
+ * wipe a running measurement. Repeat events arrive every INPUT_PRESS_TICKS (150 ms)
+ * after that, so counting them turns the gesture into a deliberate hold.
+ *
+ * The readout switches to a warning partway through, so the reset is never a surprise
+ * and releasing early cancels it.
+ */
+#define STOPWATCH_RESET_WARN_REPEATS (4)   /* ~0.9 s */
+#define STOPWATCH_RESET_FIRE_REPEATS (12)  /* ~2.1 s */
+
+/**
  * Every digit is the same size at every count. Measured on hardware at this face a digit
  * is ~11px and a colon ~6px, so MM:SS is 50px and H:MM:SS is 66px against a 72px panel.
  * HH:MM:SS would be ~77px.
@@ -89,6 +103,9 @@ typedef struct {
     char card_time[STOPWATCH_TEXT_LEN * 2];
     /** Widget has no position getter, so the slide's start point is tracked here. */
     int32_t tail_x;
+    /** Repeat events seen while Start/Pause is held; 0 when not holding. */
+    uint32_t reset_hold;
+    bool is_reset_warning;
 } BusySceneStopwatch;
 
 // MARK: - Formatting
@@ -182,6 +199,18 @@ static void busy_scene_stopwatch_render(BusyApp* instance) {
     busy_scene_stopwatch_texts(
         data->state.elapsed_ms, head_text, sizeof(head_text), tail_text, sizeof(tail_text));
 
+    if(data->is_reset_warning) {
+        // Say what is about to happen rather than letting the count vanish silently.
+        with_gui(instance->gui, {
+            label_set_text(data->head, "");
+            label_set_text(data->tail, "RESET");
+            widget_set_visible(label_get_base(data->head), false);
+            widget_update_layout(label_get_base(data->tail));
+            busy_scene_stopwatch_layout(data, 0, -1);
+        });
+        return;
+    }
+
     const StopwatchFormat format = busy_scene_stopwatch_format_for(data->state.elapsed_ms);
     const bool is_transition = (format != data->format);
 
@@ -197,6 +226,13 @@ static void busy_scene_stopwatch_render(BusyApp* instance) {
 
         label_set_text(data->head, head_text);
         label_set_text(data->tail, tail_text);
+
+        // Flush geometry before measuring. Straight after a text change the labels still
+        // report their previous size, and on the scene's very first paint that is zero —
+        // which centred a zero-width group and pushed the digits off the right edge until
+        // the next tick corrected it.
+        widget_update_layout(label_get_base(data->head));
+        widget_update_layout(label_get_base(data->tail));
 
         // Measure now, before any hiding below.
         const int32_t head_width =
@@ -257,6 +293,39 @@ static void busy_scene_stopwatch_pubsub_callback(const void* msg, void* context)
     busy_send_custom_event(instance, BusyCustomEventStopwatchUpdated);
 }
 
+/** Count a held Start/Pause towards a reset, warning first and firing once. */
+static void busy_scene_stopwatch_advance_hold(BusyApp* instance) {
+    BusySceneStopwatch* data =
+        scene_manager_get_scene_data(instance->scene_manager, BusyAppSceneIdStopwatch);
+
+    data->reset_hold++;
+
+    if(data->reset_hold == STOPWATCH_RESET_FIRE_REPEATS) {
+        stopwatch_reset(instance->stopwatch);
+        data->reset_hold = 0;
+        data->is_reset_warning = false;
+        busy_scene_stopwatch_render(instance);
+
+    } else if(data->reset_hold == STOPWATCH_RESET_WARN_REPEATS) {
+        data->is_reset_warning = true;
+        busy_scene_stopwatch_render(instance);
+    }
+}
+
+/** Releasing before the hold completes leaves the count alone. */
+static void busy_scene_stopwatch_cancel_hold(BusyApp* instance) {
+    BusySceneStopwatch* data =
+        scene_manager_get_scene_data(instance->scene_manager, BusyAppSceneIdStopwatch);
+
+    if(data->reset_hold == 0) return;
+
+    const bool was_warning = data->is_reset_warning;
+    data->reset_hold = 0;
+    data->is_reset_warning = false;
+
+    if(was_warning) busy_scene_stopwatch_render(instance);
+}
+
 static bool busy_scene_stopwatch_input_callback(const InputEvent* event, void* context) {
     furi_assert(event);
     furi_assert(context);
@@ -270,10 +339,15 @@ static bool busy_scene_stopwatch_input_callback(const InputEvent* event, void* c
         if(event->type == InputTypeShort) {
             custom_event = BusyCustomEventStopwatchToggle;
             consumed = true;
-        } else if(event->type == InputTypeLong) {
-            // Hold to zero it, the way a physical stopwatch works. Back is left alone so
-            // leaving the screen can never destroy a running measurement.
-            custom_event = BusyCustomEventStopwatchReset;
+
+        } else if(event->type == InputTypeLong || event->type == InputTypeRepeat) {
+            // Hold to zero it, the way a physical stopwatch works. Back is deliberately
+            // left alone so leaving the screen can never destroy a measurement.
+            custom_event = BusyCustomEventStopwatchHoldAdvance;
+            consumed = true;
+
+        } else if(event->type == InputTypeRelease) {
+            custom_event = BusyCustomEventStopwatchHoldCancel;
             consumed = true;
         }
     }
@@ -304,6 +378,8 @@ static void busy_scene_stopwatch_on_enter(void* context) {
     data->tail_x = 0;
     data->card_header[0] = '\0';
     data->card_time[0] = '\0';
+    data->reset_hold = 0;
+    data->is_reset_warning = false;
 
     with_gui(instance->gui, {
         GuiLayer* layer = gui_get_layer(instance->gui, GuiLayerIdMain);
@@ -384,8 +460,11 @@ static bool busy_scene_stopwatch_on_event(const SceneManagerEvent* event, void* 
         } else if(event->event == BusyCustomEventStopwatchToggle) {
             stopwatch_toggle(instance->stopwatch);
 
-        } else if(event->event == BusyCustomEventStopwatchReset) {
-            stopwatch_reset(instance->stopwatch);
+        } else if(event->event == BusyCustomEventStopwatchHoldAdvance) {
+            busy_scene_stopwatch_advance_hold(instance);
+
+        } else if(event->event == BusyCustomEventStopwatchHoldCancel) {
+            busy_scene_stopwatch_cancel_hold(instance);
         }
 
         consumed = true;
