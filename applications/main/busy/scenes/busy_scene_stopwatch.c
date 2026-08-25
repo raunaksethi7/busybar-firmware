@@ -52,8 +52,10 @@
  * The readout switches to a warning partway through, so the reset is never a surprise
  * and releasing early cancels it.
  */
-#define STOPWATCH_RESET_WARN_REPEATS (4)   /* ~0.9 s */
-#define STOPWATCH_RESET_FIRE_REPEATS (12)  /* ~2.1 s */
+#define STOPWATCH_RESET_ARM_REPEATS (6) /* ~1.05 s hold to arm */
+
+/** How long the armed state waits for confirmation before assuming a false press. */
+#define STOPWATCH_RESET_ARM_TIMEOUT_MS (4000)
 
 /**
  * Every digit is the same size at every count. Measured on hardware at this face a digit
@@ -105,7 +107,10 @@ typedef struct {
     int32_t tail_x;
     /** Repeat events seen while Start/Pause is held; 0 when not holding. */
     uint32_t reset_hold;
-    bool is_reset_warning;
+    /** Showing RESET and waiting for a confirming tap. */
+    bool is_reset_armed;
+    /** Disarms when confirmation does not arrive. */
+    FuriEventLoopTimer* arm_timer;
 } BusySceneStopwatch;
 
 // MARK: - Formatting
@@ -199,7 +204,7 @@ static void busy_scene_stopwatch_render(BusyApp* instance) {
     busy_scene_stopwatch_texts(
         data->state.elapsed_ms, head_text, sizeof(head_text), tail_text, sizeof(tail_text));
 
-    if(data->is_reset_warning) {
+    if(data->is_reset_armed) {
         // Say what is about to happen rather than letting the count vanish silently.
         with_gui(instance->gui, {
             label_set_text(data->head, "");
@@ -293,37 +298,62 @@ static void busy_scene_stopwatch_pubsub_callback(const void* msg, void* context)
     busy_send_custom_event(instance, BusyCustomEventStopwatchUpdated);
 }
 
-/** Count a held Start/Pause towards a reset, warning first and firing once. */
+/** Put the time back and stop waiting for a confirmation. */
+static void busy_scene_stopwatch_disarm(BusyApp* instance, bool repaint) {
+    BusySceneStopwatch* data =
+        scene_manager_get_scene_data(instance->scene_manager, BusyAppSceneIdStopwatch);
+
+    if(!data->is_reset_armed) return;
+
+    data->is_reset_armed = false;
+    furi_event_loop_timer_stop(data->arm_timer);
+
+    if(repaint) busy_scene_stopwatch_render(instance);
+}
+
+static void busy_scene_stopwatch_arm_timer_callback(void* context) {
+    furi_assert(context);
+    // No confirmation arrived, so the hold was almost certainly not deliberate.
+    busy_scene_stopwatch_disarm(context, true);
+}
+
+/** Count a held Start/Pause towards arming, which only ever offers the reset. */
 static void busy_scene_stopwatch_advance_hold(BusyApp* instance) {
     BusySceneStopwatch* data =
         scene_manager_get_scene_data(instance->scene_manager, BusyAppSceneIdStopwatch);
 
+    // Keeping the button down past the arming point must do nothing further. The whole
+    // point is that the confirming gesture has to be a separate one, and a steady press
+    // can only ever produce the first.
+    if(data->is_reset_armed) return;
+
     data->reset_hold++;
 
-    if(data->reset_hold == STOPWATCH_RESET_FIRE_REPEATS) {
-        stopwatch_reset(instance->stopwatch);
-        data->reset_hold = 0;
-        data->is_reset_warning = false;
-        busy_scene_stopwatch_render(instance);
-
-    } else if(data->reset_hold == STOPWATCH_RESET_WARN_REPEATS) {
-        data->is_reset_warning = true;
+    if(data->reset_hold == STOPWATCH_RESET_ARM_REPEATS) {
+        data->is_reset_armed = true;
+        furi_event_loop_timer_start(data->arm_timer, STOPWATCH_RESET_ARM_TIMEOUT_MS);
         busy_scene_stopwatch_render(instance);
     }
 }
 
-/** Releasing before the hold completes leaves the count alone. */
-static void busy_scene_stopwatch_cancel_hold(BusyApp* instance) {
+/** Releasing only ends the hold; an armed reset stays up waiting to be confirmed. */
+static void busy_scene_stopwatch_release_hold(BusyApp* instance) {
+    BusySceneStopwatch* data =
+        scene_manager_get_scene_data(instance->scene_manager, BusyAppSceneIdStopwatch);
+    data->reset_hold = 0;
+}
+
+/** A tap confirms when armed, and starts or pauses the rest of the time. */
+static void busy_scene_stopwatch_handle_tap(BusyApp* instance) {
     BusySceneStopwatch* data =
         scene_manager_get_scene_data(instance->scene_manager, BusyAppSceneIdStopwatch);
 
-    if(data->reset_hold == 0) return;
-
-    const bool was_warning = data->is_reset_warning;
-    data->reset_hold = 0;
-    data->is_reset_warning = false;
-
-    if(was_warning) busy_scene_stopwatch_render(instance);
+    if(data->is_reset_armed) {
+        stopwatch_reset(instance->stopwatch);
+        busy_scene_stopwatch_disarm(instance, true);
+    } else {
+        stopwatch_toggle(instance->stopwatch);
+    }
 }
 
 static bool busy_scene_stopwatch_input_callback(const InputEvent* event, void* context) {
@@ -335,7 +365,15 @@ static bool busy_scene_stopwatch_input_callback(const InputEvent* event, void* c
     bool consumed = false;
     BusyCustomEvent custom_event;
 
-    if(event->key == InputKeyStart) {
+    if(event->key != InputKeyStart) {
+        // Reaching for another control is a good sign the hold was not meant as a reset.
+        if(event->type == InputTypeShort || event->type == InputTypeLong) {
+            busy_send_custom_event(instance, BusyCustomEventStopwatchHoldCancel);
+        }
+        return false;
+    }
+
+    {
         if(event->type == InputTypeShort) {
             custom_event = BusyCustomEventStopwatchToggle;
             consumed = true;
@@ -347,7 +385,7 @@ static bool busy_scene_stopwatch_input_callback(const InputEvent* event, void* c
             consumed = true;
 
         } else if(event->type == InputTypeRelease) {
-            custom_event = BusyCustomEventStopwatchHoldCancel;
+            custom_event = BusyCustomEventStopwatchHoldRelease;
             consumed = true;
         }
     }
@@ -379,7 +417,7 @@ static void busy_scene_stopwatch_on_enter(void* context) {
     data->card_header[0] = '\0';
     data->card_time[0] = '\0';
     data->reset_hold = 0;
-    data->is_reset_warning = false;
+    data->is_reset_armed = false;
 
     with_gui(instance->gui, {
         GuiLayer* layer = gui_get_layer(instance->gui, GuiLayerIdMain);
@@ -415,6 +453,12 @@ static void busy_scene_stopwatch_on_enter(void* context) {
         FuriEventLoopTimerTypeOnce,
         instance);
 
+    data->arm_timer = furi_event_loop_timer_alloc(
+        instance->event_loop,
+        busy_scene_stopwatch_arm_timer_callback,
+        FuriEventLoopTimerTypeOnce,
+        instance);
+
     data->stopwatch_pubsub = stopwatch_get_pubsub(instance->stopwatch);
     data->stopwatch_sub = furi_pubsub_subscribe(
         data->stopwatch_pubsub, busy_scene_stopwatch_pubsub_callback, instance);
@@ -432,6 +476,7 @@ static void busy_scene_stopwatch_on_exit(void* context) {
 
     furi_pubsub_unsubscribe(data->stopwatch_pubsub, data->stopwatch_sub);
     furi_event_loop_timer_free(data->reveal_timer);
+    furi_event_loop_timer_free(data->arm_timer);
 
     with_gui(instance->gui, {
         GuiLayer* layer = gui_get_layer(instance->gui, GuiLayerIdMain);
@@ -458,13 +503,16 @@ static bool busy_scene_stopwatch_on_event(const SceneManagerEvent* event, void* 
             busy_scene_stopwatch_render(instance);
 
         } else if(event->event == BusyCustomEventStopwatchToggle) {
-            stopwatch_toggle(instance->stopwatch);
+            busy_scene_stopwatch_handle_tap(instance);
 
         } else if(event->event == BusyCustomEventStopwatchHoldAdvance) {
             busy_scene_stopwatch_advance_hold(instance);
 
+        } else if(event->event == BusyCustomEventStopwatchHoldRelease) {
+            busy_scene_stopwatch_release_hold(instance);
+
         } else if(event->event == BusyCustomEventStopwatchHoldCancel) {
-            busy_scene_stopwatch_cancel_hold(instance);
+            busy_scene_stopwatch_disarm(instance, true);
         }
 
         consumed = true;
