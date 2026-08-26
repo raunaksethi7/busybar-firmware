@@ -23,6 +23,12 @@ bool updater_settings_load(UpdaterSettings* settings) {
     bool is_successful = setting_provider_load(provider, &UPDATER_SETTINGS_ROOT, settings);
     setting_provider_free(provider);
 
+    // Unattended updating is removed on this firmware. Forced off here rather than only
+    // where the timer is armed, so a stale settings file, a restored backup, or a factory
+    // reset cannot bring it back — this build never reports it enabled and never acts on
+    // it. Updating is a deliberate act: fetch a bundle and install it.
+    settings->autoupdate_enabled = false;
+
     return is_successful;
 }
 

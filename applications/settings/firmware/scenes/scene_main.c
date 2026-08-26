@@ -48,19 +48,14 @@ static void firmware_settings_main_scene_on_enter(void* context) {
             firmware_settings_main_scene_submenu_callback,
             instance);
 
-        submenu_add_item(
-            scene->front_submenu,
-            "Settings",
-            NULL,
-            FirmwareSettingsMainSceneEventSettings,
-            firmware_settings_main_scene_submenu_callback,
-            instance);
+        // No Settings entry: unattended updating is removed on this firmware, and it was
+        // the only thing on that screen outside a debug build. Leaving the entry would
+        // open an empty list.
 
         /* back layout setup */
         scene->back_submenu = submenu_alloc(instance->back_scene_window);
         submenu_add_item(scene->back_submenu, "Check for update", NULL, 0, NULL, NULL);
         submenu_add_item(scene->back_submenu, "Version info", NULL, 0, NULL, NULL);
-        submenu_add_item(scene->back_submenu, "Settings", NULL, 0, NULL, NULL);
 
         widget_set_scrollbar_enabled(submenu_get_base(scene->front_submenu), true);
         widget_set_scrollbar_enabled(submenu_get_base(scene->back_submenu), true);

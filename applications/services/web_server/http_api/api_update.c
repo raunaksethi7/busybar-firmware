@@ -817,9 +817,15 @@ static void api_update_autoupdate_set(struct mg_connection* conn, struct mg_http
     bool is_success;
     do {
         bool value;
-        if(mg_json_get_bool(msg->body, "$." UPDATE_JSON_KEY_AUTOUPDATE_ENABLED, &value)) {
-            settings.autoupdate_enabled = value;
+        if(mg_json_get_bool(msg->body, "$." UPDATE_JSON_KEY_AUTOUPDATE_ENABLED, &value) &&
+           value) {
+            // Unattended updating is removed on this firmware. Refuse the request outright
+            // rather than accepting it and quietly doing nothing, so a caller is never told
+            // it enabled something that will not happen.
+            MG_REPLY_BAD_REQUEST(conn);
+            break;
         }
+        settings.autoupdate_enabled = false;
 
         char* time_string;
         uint32_t minutes_total;

@@ -600,13 +600,8 @@ void updater_internal_settings_change_build_specific(
         instance->check_timer, furi_ms_to_ticks(instance->settings.check_startup_interval));
 
 #ifdef SRV_TIME
-    if(instance->settings.autoupdate_enabled) {
-        furi_event_loop_timer_start(
-            instance->autoupdate_timer,
-            furi_ms_to_ticks(instance->settings.autoupdate_attempt_delay));
-    } else {
-        furi_event_loop_timer_stop(instance->autoupdate_timer);
-    }
+    // Unattended updating is removed on this firmware; the timer is never armed.
+    furi_event_loop_timer_stop(instance->autoupdate_timer);
 #endif /* SRV_TIME */
 }
 
@@ -651,13 +646,9 @@ void updater_internal_setup_build_specific(Updater* instance) {
     furi_event_loop_timer_start(
         instance->check_timer, furi_ms_to_ticks(instance->settings.check_startup_interval));
 
-#ifdef SRV_TIME
-    if(instance->settings.autoupdate_enabled) {
-        furi_event_loop_timer_start(
-            instance->autoupdate_timer,
-            furi_ms_to_ticks(instance->settings.autoupdate_attempt_delay));
-    }
-#endif /* SRV_TIME */
+    // Deliberately no autoupdate timer here: unattended updating is removed on this
+    // firmware. The timer object still exists so the rest of the file compiles unchanged,
+    // but nothing ever starts it.
 }
 
 #endif /* FW_CFG_recovery */

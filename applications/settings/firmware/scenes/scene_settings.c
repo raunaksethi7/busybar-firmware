@@ -109,12 +109,9 @@ static void firmware_settings_scene_settings_on_enter(void* context) {
     with_gui(instance->gui, {
         scene->front_list = var_item_list_alloc(instance->front_scene_window);
 
-        VarItem* front_auto_update_item = var_item_list_add_switch(
-            scene->front_list,
-            "Auto-update",
-            firmware_settings_scene_settings_autoupdate_callback,
-            instance);
-        var_item_set_value(front_auto_update_item, scene->updater_settings.autoupdate_enabled);
+        // No Auto-update row: unattended updating is removed on this firmware, and a
+        // toggle that cannot change anything is worse than no toggle.
+        UNUSED(firmware_settings_scene_settings_autoupdate_callback);
 
         if(is_debug_flag_set) {
             VarItem* front_check_channel_item = var_item_list_add_selector(
@@ -130,9 +127,7 @@ static void firmware_settings_scene_settings_on_enter(void* context) {
 
         scene->back_list = var_item_list_alloc(instance->back_scene_window);
 
-        VarItem* back_auto_update_item =
-            var_item_list_add_switch(scene->back_list, "Auto-update", NULL, NULL);
-        var_item_set_value(back_auto_update_item, scene->updater_settings.autoupdate_enabled);
+        // Mirrors the front list, which no longer carries an Auto-update row.
 
         if(is_debug_flag_set) {
             VarItem* back_check_channel_item = var_item_list_add_selector(
