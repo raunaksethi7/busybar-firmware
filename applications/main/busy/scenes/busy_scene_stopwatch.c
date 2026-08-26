@@ -350,6 +350,10 @@ static void busy_scene_stopwatch_handle_tap(BusyApp* instance) {
 
     if(data->is_reset_armed) {
         stopwatch_reset(instance->stopwatch);
+        // Commands queue in order, so this blocking read returns the state *after* the
+        // reset. Without it the repaint below would draw the stale pre-reset time for a
+        // tick before the event arrived.
+        stopwatch_get_state(instance->stopwatch, &data->state);
         busy_scene_stopwatch_disarm(instance, true);
     } else {
         stopwatch_toggle(instance->stopwatch);

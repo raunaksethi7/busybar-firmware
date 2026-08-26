@@ -105,9 +105,12 @@ static void stopwatch_handle_reset(Stopwatch* instance) {
     instance->elapsed_ms = 0;
     instance->published_second = 0;
 
-    // Reset while running must not credit the time since the last poll.
+    // Back to the power-on state: zero *and* stopped. Leaving it running would start
+    // counting again the instant it was cleared, which is not what reset means on any
+    // stopwatch — the next press is what starts it.
     if(instance->is_running) {
-        instance->prev_tick_timestamp_ms = furi_hal_rtc_get_timestamp_ms();
+        instance->is_running = false;
+        furi_event_loop_timer_stop(instance->poll_timer);
     }
 
     stopwatch_notify(instance, StopwatchEventTypeStateChanged);

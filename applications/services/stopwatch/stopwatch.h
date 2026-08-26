@@ -58,7 +58,7 @@ void stopwatch_pause(Stopwatch* instance);
 /** Start if paused, pause if running. */
 void stopwatch_toggle(Stopwatch* instance);
 
-/** Return to zero. Leaves the running/paused state alone. */
+/** Return to zero and stop. The next ``stopwatch_start`` is what resumes counting. */
 void stopwatch_reset(Stopwatch* instance);
 
 /** Read the current state. Blocks briefly on the service thread. */
