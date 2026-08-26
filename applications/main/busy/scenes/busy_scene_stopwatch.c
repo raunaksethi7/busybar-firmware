@@ -3,6 +3,7 @@
 #include <gui/modules/label.h>
 #include <font_registry/fonts.h>
 #include <stopwatch/stopwatch.h>
+#include <brightness_control/brightness_control.h>
 #include <toolbox/color.h>
 
 #include "../helpers/animate.h"
@@ -56,6 +57,23 @@
 
 /** How long the armed state waits for confirmation before assuming a false press. */
 #define STOPWATCH_RESET_ARM_TIMEOUT_MS (4000)
+
+/** Brightness step per detent of the wheel. */
+#define STOPWATCH_BRIGHTNESS_STEP (5)
+
+/**
+ * Dialling the starting time: minutes per detent, and the same again once the wheel is
+ * being spun rather than nudged.
+ *
+ * A single rate cannot serve both jobs. Restoring several hours at one minute a detent
+ * is hundreds of clicks, while a coarse-only rate cannot land on a specific minute. So
+ * detents arriving in quick succession switch to the coarse step, and pausing goes back
+ * to fine.
+ */
+#define STOPWATCH_ADJUST_FINE_MN   (1)
+#define STOPWATCH_ADJUST_COARSE_MN (15)
+#define STOPWATCH_ADJUST_RAMP_AFTER (5)
+#define STOPWATCH_ADJUST_RAMP_GAP_MS (400)
 
 /**
  * Every digit is the same size at every count. Measured on hardware at this face a digit
@@ -111,6 +129,15 @@ typedef struct {
     bool is_reset_armed;
     /** Disarms when confirmation does not arrive. */
     FuriEventLoopTimer* arm_timer;
+
+    /** Wheel is retasked to brightness until clicked again. */
+    bool is_brightness_mode;
+    BrightnessControl* brightness;
+    uint8_t brightness_value;
+
+    /** Consecutive quick detents, for ramping the dial rate. */
+    uint32_t adjust_run;
+    uint32_t adjust_last_ms;
 } BusySceneStopwatch;
 
 // MARK: - Formatting
@@ -204,6 +231,26 @@ static void busy_scene_stopwatch_render(BusyApp* instance) {
     busy_scene_stopwatch_texts(
         data->state.elapsed_ms, head_text, sizeof(head_text), tail_text, sizeof(tail_text));
 
+    if(data->is_brightness_mode) {
+        char brightness_text[STOPWATCH_TEXT_LEN];
+        snprintf(brightness_text, sizeof(brightness_text), "%u%%", data->brightness_value);
+
+        with_gui(instance->gui, {
+            label_set_text(data->head, "");
+            label_set_text(data->tail, brightness_text);
+            widget_set_visible(label_get_base(data->head), false);
+            widget_update_layout(label_get_base(data->tail));
+            busy_scene_stopwatch_layout(data, 0, -1);
+
+            const char* header = "BRIGHT";
+            if(strcmp(data->card_header, header) != 0) {
+                strncpy(data->card_header, header, sizeof(data->card_header) - 1);
+                mirror_card_set_header_text(instance->timer_card, data->card_header);
+            }
+        });
+        return;
+    }
+
     if(data->is_reset_armed) {
         // Say what is about to happen rather than letting the count vanish silently.
         with_gui(instance->gui, {
@@ -260,6 +307,12 @@ static void busy_scene_stopwatch_render(BusyApp* instance) {
             data->format = format;
 
         } else {
+            // Restore the hours whenever the readout is not mid-growth. The brightness
+            // and RESET screens hide the head, and without this it stayed hidden — while
+            // its width went on being reserved, so the time also sat visibly off-centre.
+            if(!data->is_head_pending) {
+                widget_set_visible(label_get_base(data->head), head_text[0] != '\0');
+            }
             busy_scene_stopwatch_layout(data, head_width, -1);
         }
 
@@ -296,6 +349,84 @@ static void busy_scene_stopwatch_pubsub_callback(const void* msg, void* context)
     data->state = event->state;
 
     busy_send_custom_event(instance, BusyCustomEventStopwatchUpdated);
+}
+
+// MARK: - Wheel
+
+static uint8_t busy_scene_stopwatch_read_brightness(BusySceneStopwatch* data) {
+    FuriState* fstate = brightness_control_get_state(data->brightness);
+    BrightnessControlState state;
+    furi_state_get(fstate, &state);
+    return state.brightness_setting;
+}
+
+/** Nudge the display brightness and keep the on-screen number in step. */
+static void busy_scene_stopwatch_step_brightness(BusyApp* instance, int32_t direction) {
+    BusySceneStopwatch* data =
+        scene_manager_get_scene_data(instance->scene_manager, BusyAppSceneIdStopwatch);
+
+    int32_t next = (int32_t)data->brightness_value + direction * STOPWATCH_BRIGHTNESS_STEP;
+    if(next < BRIGHTNESS_MIN) next = BRIGHTNESS_MIN;
+    if(next > BRIGHTNESS_MAX) next = BRIGHTNESS_MAX;
+
+    data->brightness_value = (uint8_t)next;
+    brightness_control_set_manual_brightness(data->brightness, data->brightness_value);
+
+    busy_scene_stopwatch_render(instance);
+}
+
+/**
+ * Dial the starting time, faster while the wheel keeps moving.
+ *
+ * The service refuses this once the count has been started, so there is no need to
+ * check here — a turn mid-measurement simply does nothing.
+ */
+static void busy_scene_stopwatch_step_offset(BusyApp* instance, int32_t direction) {
+    BusySceneStopwatch* data =
+        scene_manager_get_scene_data(instance->scene_manager, BusyAppSceneIdStopwatch);
+
+    if(!data->state.can_adjust) return;
+
+    const uint32_t now_ms = furi_get_tick();
+    if(now_ms - data->adjust_last_ms > STOPWATCH_ADJUST_RAMP_GAP_MS) {
+        data->adjust_run = 0;
+    }
+    data->adjust_last_ms = now_ms;
+    data->adjust_run++;
+
+    const int32_t minutes = (data->adjust_run > STOPWATCH_ADJUST_RAMP_AFTER) ?
+                                STOPWATCH_ADJUST_COARSE_MN :
+                                STOPWATCH_ADJUST_FINE_MN;
+
+    stopwatch_adjust(instance->stopwatch, direction * minutes * 60 * 1000);
+    // Read back rather than waiting for the tick: the count is not running, so no tick
+    // is coming and the readout would sit stale until the next turn.
+    stopwatch_get_state(instance->stopwatch, &data->state);
+    busy_scene_stopwatch_render(instance);
+}
+
+static void busy_scene_stopwatch_toggle_brightness_mode(BusyApp* instance) {
+    BusySceneStopwatch* data =
+        scene_manager_get_scene_data(instance->scene_manager, BusyAppSceneIdStopwatch);
+
+    data->is_brightness_mode = !data->is_brightness_mode;
+    if(data->is_brightness_mode) {
+        data->brightness_value = busy_scene_stopwatch_read_brightness(data);
+    }
+
+    busy_scene_stopwatch_render(instance);
+}
+
+/** One place deciding what a turn of the wheel currently means. */
+static void busy_scene_stopwatch_handle_wheel(BusyApp* instance, int32_t direction) {
+    BusySceneStopwatch* data =
+        scene_manager_get_scene_data(instance->scene_manager, BusyAppSceneIdStopwatch);
+
+    if(data->is_brightness_mode) {
+        busy_scene_stopwatch_step_brightness(instance, direction);
+    } else {
+        busy_scene_stopwatch_step_offset(instance, direction);
+    }
 }
 
 /** Put the time back and stop waiting for a confirmation. */
@@ -369,6 +500,26 @@ static bool busy_scene_stopwatch_input_callback(const InputEvent* event, void* c
     bool consumed = false;
     BusyCustomEvent custom_event;
 
+    if(event->key == InputKeyOk) {
+        // Click the wheel to retask it to brightness, click again to put it back.
+        if(event->type == InputTypeShort) {
+            busy_send_custom_event(instance, BusyCustomEventStopwatchBrightnessMode);
+            return true;
+        }
+        return false;
+    }
+
+    if(event->key == InputKeyUp || event->key == InputKeyDown) {
+        if(event->type == InputTypeShort || event->type == InputTypeRepeat) {
+            busy_send_custom_event(
+                instance,
+                (event->key == InputKeyUp) ? BusyCustomEventStopwatchWheelUp :
+                                             BusyCustomEventStopwatchWheelDown);
+            return true;
+        }
+        return false;
+    }
+
     if(event->key != InputKeyStart) {
         // Reaching for another control is a good sign the hold was not meant as a reset.
         if(event->type == InputTypeShort || event->type == InputTypeLong) {
@@ -422,6 +573,11 @@ static void busy_scene_stopwatch_on_enter(void* context) {
     data->card_time[0] = '\0';
     data->reset_hold = 0;
     data->is_reset_armed = false;
+    data->is_brightness_mode = false;
+    data->adjust_run = 0;
+    data->adjust_last_ms = 0;
+    data->brightness = furi_record_open(RECORD_BRIGHTNESS_CONTROL);
+    data->brightness_value = busy_scene_stopwatch_read_brightness(data);
 
     with_gui(instance->gui, {
         GuiLayer* layer = gui_get_layer(instance->gui, GuiLayerIdMain);
@@ -481,6 +637,7 @@ static void busy_scene_stopwatch_on_exit(void* context) {
     furi_pubsub_unsubscribe(data->stopwatch_pubsub, data->stopwatch_sub);
     furi_event_loop_timer_free(data->reveal_timer);
     furi_event_loop_timer_free(data->arm_timer);
+    furi_record_close(RECORD_BRIGHTNESS_CONTROL);
 
     with_gui(instance->gui, {
         GuiLayer* layer = gui_get_layer(instance->gui, GuiLayerIdMain);
@@ -517,6 +674,16 @@ static bool busy_scene_stopwatch_on_event(const SceneManagerEvent* event, void* 
 
         } else if(event->event == BusyCustomEventStopwatchHoldCancel) {
             busy_scene_stopwatch_disarm(instance, true);
+
+        } else if(event->event == BusyCustomEventStopwatchBrightnessMode) {
+            busy_scene_stopwatch_disarm(instance, false);
+            busy_scene_stopwatch_toggle_brightness_mode(instance);
+
+        } else if(event->event == BusyCustomEventStopwatchWheelUp) {
+            busy_scene_stopwatch_handle_wheel(instance, +1);
+
+        } else if(event->event == BusyCustomEventStopwatchWheelDown) {
+            busy_scene_stopwatch_handle_wheel(instance, -1);
         }
 
         consumed = true;

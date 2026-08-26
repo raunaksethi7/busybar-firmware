@@ -22,6 +22,7 @@ typedef enum {
     StopwatchApiMessageTypePause,
     StopwatchApiMessageTypeToggle,
     StopwatchApiMessageTypeReset,
+    StopwatchApiMessageTypeAdjust,
     StopwatchApiMessageTypeGetState,
     StopwatchApiMessageTypeMax,
 } StopwatchApiMessageType;
@@ -31,9 +32,14 @@ typedef struct {
 } StopwatchApiMessageGetState;
 
 typedef struct {
+    int32_t delta_ms;
+} StopwatchApiMessageAdjust;
+
+typedef struct {
     StopwatchApiMessageType type;
     union {
         StopwatchApiMessageGetState get_state;
+        StopwatchApiMessageAdjust adjust;
     } data;
     FuriApiLock lock;
 } StopwatchApiMessage;
@@ -50,4 +56,6 @@ struct Stopwatch {
     /** Whole seconds last published, so a tick fires only when the digits change. */
     uint32_t published_second;
     bool is_running;
+    /** Not yet started since the last reset, so the elapsed time may still be dialled. */
+    bool can_adjust;
 };

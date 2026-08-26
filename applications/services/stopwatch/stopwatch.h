@@ -39,6 +39,14 @@ typedef enum {
 typedef struct {
     uint32_t elapsed_ms;
     bool is_running;
+    /**
+     * True until the count is first started after a reset or power-on.
+     *
+     * While pristine the elapsed time may be dialled to a starting value, which is how
+     * a measurement is resumed after the count is lost. Once started it is false, so a
+     * knock of the wheel mid-measurement can never move the number.
+     */
+    bool can_adjust;
 } StopwatchState;
 
 typedef struct {
@@ -60,6 +68,16 @@ void stopwatch_toggle(Stopwatch* instance);
 
 /** Return to zero and stop. The next ``stopwatch_start`` is what resumes counting. */
 void stopwatch_reset(Stopwatch* instance);
+
+/**
+ * Move the starting elapsed time, for picking a measurement back up.
+ *
+ * Ignored unless ``StopwatchState/can_adjust`` — only a count that has not been started
+ * can be dialled. Clamped to zero and to the rollover.
+ *
+ * @param delta_ms signed offset in milliseconds
+ */
+void stopwatch_adjust(Stopwatch* instance, int32_t delta_ms);
 
 /** Read the current state. Blocks briefly on the service thread. */
 void stopwatch_get_state(const Stopwatch* instance, StopwatchState* state);

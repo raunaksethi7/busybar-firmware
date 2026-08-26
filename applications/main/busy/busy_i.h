@@ -59,6 +59,9 @@ typedef enum {
     BusyCustomEventStopwatchHoldAdvance,
     BusyCustomEventStopwatchHoldRelease,
     BusyCustomEventStopwatchHoldCancel,
+    BusyCustomEventStopwatchBrightnessMode,
+    BusyCustomEventStopwatchWheelUp,
+    BusyCustomEventStopwatchWheelDown,
     BusyCustomEventMax,
 } BusyCustomEvent;
 

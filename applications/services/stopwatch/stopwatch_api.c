@@ -55,6 +55,16 @@ void stopwatch_reset(Stopwatch* instance) {
     stopwatch_api_asynchronous_request(instance, &message);
 }
 
+void stopwatch_adjust(Stopwatch* instance, int32_t delta_ms) {
+    furi_check(instance);
+
+    StopwatchApiMessage message = {
+        .type = StopwatchApiMessageTypeAdjust,
+        .data.adjust = {.delta_ms = delta_ms},
+    };
+    stopwatch_api_asynchronous_request(instance, &message);
+}
+
 void stopwatch_get_state(const Stopwatch* instance, StopwatchState* state) {
     furi_check(instance);
     furi_check(state);

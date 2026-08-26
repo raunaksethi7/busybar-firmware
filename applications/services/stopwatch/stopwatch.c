@@ -19,6 +19,7 @@ static void stopwatch_notify(const Stopwatch* instance, StopwatchEventType type)
             {
                 .elapsed_ms = instance->elapsed_ms,
                 .is_running = instance->is_running,
+                .can_adjust = instance->can_adjust,
             },
     };
 
@@ -75,6 +76,8 @@ static void stopwatch_handle_start(Stopwatch* instance) {
     if(instance->is_running) return;
 
     instance->is_running = true;
+    // Starting fixes the number: from here a stray turn of the wheel must not move it.
+    instance->can_adjust = false;
     instance->prev_tick_timestamp_ms = furi_hal_rtc_get_timestamp_ms();
     furi_event_loop_timer_start(instance->poll_timer, STOPWATCH_POLL_PERIOD_MS);
 
@@ -113,6 +116,24 @@ static void stopwatch_handle_reset(Stopwatch* instance) {
         furi_event_loop_timer_stop(instance->poll_timer);
     }
 
+    // Back to a dialable count, so a measurement can be picked up where it left off.
+    instance->can_adjust = true;
+
+    stopwatch_notify(instance, StopwatchEventTypeStateChanged);
+}
+
+static void stopwatch_handle_adjust(Stopwatch* instance, int32_t delta_ms) {
+    if(!instance->can_adjust) return;
+
+    // Clamp rather than wrap. Turning down past zero should stop at zero, not jump to
+    // the far end of the day.
+    int64_t next = (int64_t)instance->elapsed_ms + delta_ms;
+    if(next < 0) next = 0;
+    if(next >= (int64_t)STOPWATCH_ROLLOVER_MS) next = (int64_t)STOPWATCH_ROLLOVER_MS - 1000;
+
+    instance->elapsed_ms = (uint32_t)next;
+    instance->published_second = instance->elapsed_ms / 1000;
+
     stopwatch_notify(instance, StopwatchEventTypeStateChanged);
 }
 
@@ -124,6 +145,7 @@ static void stopwatch_handle_get_state(Stopwatch* instance, StopwatchState* stat
 
     state->elapsed_ms = instance->elapsed_ms;
     state->is_running = instance->is_running;
+    state->can_adjust = instance->can_adjust;
 }
 
 static void stopwatch_message_queue_callback(FuriEventLoopObject* object, void* context) {
@@ -148,6 +170,9 @@ static void stopwatch_message_queue_callback(FuriEventLoopObject* object, void* 
         break;
     case StopwatchApiMessageTypeReset:
         stopwatch_handle_reset(instance);
+        break;
+    case StopwatchApiMessageTypeAdjust:
+        stopwatch_handle_adjust(instance, message.data.adjust.delta_ms);
         break;
     case StopwatchApiMessageTypeGetState:
         stopwatch_handle_get_state(instance, message.data.get_state.state);
@@ -180,6 +205,7 @@ static Stopwatch* stopwatch_alloc(void) {
     instance->prev_tick_timestamp_ms = 0;
     instance->published_second = instance->elapsed_ms / 1000;
     instance->is_running = false;
+    instance->can_adjust = true;
 
     furi_event_loop_subscribe_message_queue(
         instance->event_loop,

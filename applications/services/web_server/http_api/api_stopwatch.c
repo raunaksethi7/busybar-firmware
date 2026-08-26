@@ -26,9 +26,10 @@ static void api_stopwatch_reply_state(struct mg_connection* conn) {
     snprintf(
         json,
         sizeof(json),
-        "{\"elapsed_ms\":%lu,\"is_running\":%s}",
+        "{\"elapsed_ms\":%lu,\"is_running\":%s,\"can_adjust\":%s}",
         (unsigned long)state.elapsed_ms,
-        state.is_running ? "true" : "false");
+        state.is_running ? "true" : "false",
+        state.can_adjust ? "true" : "false");
 
     MG_REPLY_OK_BODY(conn, json);
 }
