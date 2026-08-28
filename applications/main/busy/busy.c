@@ -205,6 +205,7 @@ static BusyApp* busy_alloc(const char* arg) {
 }
 
 static void busy_free(BusyApp* instance) {
+    FURI_LOG_I("SlotDbg", "busy_free ENTER");
     busy_api_abort_pending_messages(instance);
 
     furi_record_destroy(RECORD_BUSY_APP);
@@ -249,9 +250,12 @@ static void busy_free(BusyApp* instance) {
 }
 
 int32_t busy_app(void* arg) {
+    FURI_LOG_I("SlotDbg", "busy_app ENTER");
     BusyApp* instance = busy_alloc(arg);
     furi_event_loop_run(instance->event_loop);
+    FURI_LOG_I("SlotDbg", "busy_app loop returned");
     busy_free(instance);
+    FURI_LOG_I("SlotDbg", "busy_app EXIT");
 
     return 0;
 }

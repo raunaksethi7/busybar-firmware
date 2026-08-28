@@ -135,6 +135,9 @@ static const DesktopDefaultApp* desktop_get_current_default_app(const Desktop* i
     Desktop* mutable_instance = (Desktop*)instance;
 
     const char* assigned = desktop_settings_get_slot(&instance->settings, instance->switch_pos);
+    FURI_LOG_I(
+        "SlotDbg", "default_app pos=%d assigned=%s", instance->switch_pos,
+        assigned ? assigned : "(none)");
     if(assigned != NULL) {
         mutable_instance->slot_app.name = assigned;
         // Assigned apps take no launch argument. The built-in CUSTOM mapping passes one to
