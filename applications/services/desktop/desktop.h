@@ -9,6 +9,8 @@
  */
 #pragma once
 
+#include <input/input.h>
+
 #include <stdbool.h>
 
 /**
@@ -74,3 +76,26 @@ void desktop_pin_current_app(Desktop* instance, bool pin);
  *          DesktopSwitchDirectionDown if switch was last moved down
  */
 DesktopSwitchDirection desktop_get_switch_direction(Desktop* instance);
+
+/**
+ * @brief Get the app assigned to a rotary switch position.
+ *
+ * @param[in] instance pointer to the Desktop instance
+ * @param[in] pos switch position to query
+ * @returns the assigned app id, or NULL when the position uses its built-in default
+ */
+const char* desktop_get_slot_app(Desktop* instance, InputSwitchPosition pos);
+
+/**
+ * @brief Assign an app to a rotary switch position.
+ *
+ * The assignment is stored and survives a restart. Pass NULL or an empty string to clear
+ * it and go back to the built-in default. Takes effect the next time the switch lands on
+ * that position, so moving the switch away and back applies it.
+ *
+ * @param[in,out] instance pointer to the Desktop instance
+ * @param[in] pos switch position to assign
+ * @param[in] app_id id of the app to launch there, or NULL to clear
+ * @returns false if the position is invalid, the id is too long, or saving failed
+ */
+bool desktop_set_slot_app(Desktop* instance, InputSwitchPosition pos, const char* app_id);

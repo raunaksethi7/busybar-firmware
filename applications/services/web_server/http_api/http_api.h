@@ -39,6 +39,16 @@ bool http_api_assets_hdr_callback(
     struct mg_http_message* msg,
     void* ctx);
 
+// Slots (rotary switch position -> app)
+void* http_api_slots_alloc(void);
+void http_api_slots_free(void* ctx);
+bool http_api_slots_callback(
+    FuriString* path,
+    HttpMethod method,
+    struct mg_connection* conn,
+    struct mg_http_message* msg,
+    void* ctx);
+
 // Stopwatch
 void* http_api_stopwatch_alloc(void);
 void http_api_stopwatch_free(void* ctx);

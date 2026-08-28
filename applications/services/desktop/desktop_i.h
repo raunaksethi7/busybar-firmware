@@ -1,6 +1,13 @@
 #pragma once
 
 #include "desktop.h"
+#include "settings/settings.h"
+
+/** An app to launch for a switch position, with an optional launch argument. */
+typedef struct {
+    const char* name;
+    const char* args;
+} DesktopDefaultApp;
 
 #include <furi.h>
 
@@ -32,6 +39,10 @@ struct Desktop {
     DesktopOverlay* overlay;
     DesktopStartRequest* current_request;
     InputSwitchPosition switch_pos;
+    /** Assignments of apps to switch positions; empty entries fall back to defaults. */
+    DesktopSettings settings;
+    /** Filled from the settings when an assignment is in force for the current position. */
+    DesktopDefaultApp slot_app;
     DesktopSwitchDirection switch_direction;
     bool pin_current_app;
 };

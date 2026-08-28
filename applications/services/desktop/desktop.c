@@ -4,11 +4,6 @@
 
 #define TAG "Desktop"
 
-typedef struct {
-    const char* name;
-    const char* args;
-} DesktopDefaultApp;
-
 static const DesktopDefaultApp desktop_default_apps[];
 
 // Called by the Input service thread when the user interacts with the rotary switch
@@ -131,8 +126,23 @@ static void desktop_handle_error(Desktop* instance) {
     FURI_LOG_D(TAG, "Error starting app: %s", error_message);
 }
 
-// Get the default app according to the current switch position
+// Get the app for the current switch position: an assignment if one is stored, otherwise
+// the built-in default.
+//
+// The returned struct is filled from the instance's own storage rather than pointing into
+// the static table, so an assigned id stays valid for as long as the settings do.
 static const DesktopDefaultApp* desktop_get_current_default_app(const Desktop* instance) {
+    Desktop* mutable_instance = (Desktop*)instance;
+
+    const char* assigned = desktop_settings_get_slot(&instance->settings, instance->switch_pos);
+    if(assigned != NULL) {
+        mutable_instance->slot_app.name = assigned;
+        // Assigned apps take no launch argument. The built-in CUSTOM mapping passes one to
+        // reach the busy app's custom mode, which is specific to that mapping.
+        mutable_instance->slot_app.args = NULL;
+        return &mutable_instance->slot_app;
+    }
+
     return &desktop_default_apps[instance->switch_pos];
 }
 
@@ -312,6 +322,18 @@ static void desktop_exit_semaphore_callback(FuriEventLoopObject* object, void* c
     furi_semaphore_release(instance->exit_semaphore);
 }
 
+const char* desktop_get_slot_app(Desktop* instance, InputSwitchPosition pos) {
+    furi_check(instance);
+    return desktop_settings_get_slot(&instance->settings, pos);
+}
+
+bool desktop_set_slot_app(Desktop* instance, InputSwitchPosition pos, const char* app_id) {
+    furi_check(instance);
+
+    if(!desktop_settings_set_slot(&instance->settings, pos, app_id)) return false;
+    return desktop_settings_save(&instance->settings);
+}
+
 static Desktop* desktop_alloc(void) {
     Desktop* instance = malloc(sizeof(Desktop));
 
@@ -322,6 +344,8 @@ static Desktop* desktop_alloc(void) {
     instance->start_queue =
         furi_message_queue_alloc(START_QUEUE_COUNT, sizeof(DesktopStartRequest*));
     instance->switch_pos = InputSwitchPositionMAX;
+    instance->slot_app = (DesktopDefaultApp){.name = NULL, .args = NULL};
+    desktop_settings_load(&instance->settings);
     instance->switch_timer = furi_event_loop_timer_alloc(
         instance->event_loop, desktop_switch_timer_callback, FuriEventLoopTimerTypeOnce, instance);
     instance->start_timer = furi_event_loop_timer_alloc(
